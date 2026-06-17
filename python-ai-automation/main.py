@@ -14,8 +14,10 @@ Usage:
 import argparse
 import json
 import os
+import subprocess
 import sys
 from datetime import datetime
+from fractions import Fraction
 from pathlib import Path
 
 # Add parent directory to path for imports
@@ -43,7 +45,7 @@ class VideoAnalyzer:
 
         stat = path.stat()
 
-        return {
+        metadata = {
             "filename": path.name,
             "name_without_ext": path.stem,
             "extension": path.suffix,
@@ -51,6 +53,85 @@ class VideoAnalyzer:
             "size_mb": round(stat.st_size / (1024 * 1024), 2),
             "modified_at": datetime.fromtimestamp(stat.st_mtime).isoformat(),
         }
+
+        metadata.update(self.read_video_metadata(path))
+        return metadata
+
+    def read_video_metadata(self, filepath: Path) -> dict:
+        """Read real video metadata with ffprobe."""
+        command = [
+            "ffprobe",
+            "-v",
+            "error",
+            "-select_streams",
+            "v:0",
+            "-show_entries",
+            "stream=width,height,duration,avg_frame_rate,r_frame_rate:format=duration",
+            "-of",
+            "json",
+            str(filepath),
+        ]
+
+        try:
+            result = subprocess.run(
+                command,
+                capture_output=True,
+                check=True,
+                text=True,
+                timeout=30,
+            )
+        except FileNotFoundError as exc:
+            raise RuntimeError("ffprobe is required to read video metadata.") from exc
+        except subprocess.CalledProcessError as exc:
+            message = exc.stderr.strip() or "ffprobe failed to read video metadata."
+            raise RuntimeError(message) from exc
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError("ffprobe timed out while reading video metadata.") from exc
+
+        try:
+            data = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError("ffprobe returned invalid JSON metadata.") from exc
+
+        streams = data.get("streams", [])
+        if not streams:
+            raise RuntimeError("No video stream found in the file.")
+
+        stream = streams[0]
+        width = stream.get("width")
+        height = stream.get("height")
+        duration = stream.get("duration") or data.get("format", {}).get("duration")
+        frame_rate = self._parse_frame_rate(
+            stream.get("avg_frame_rate") or stream.get("r_frame_rate")
+        )
+
+        return {
+            "duration_seconds": self._parse_duration(duration),
+            "width": width,
+            "height": height,
+            "resolution": f"{width}x{height}" if width and height else None,
+            "frame_rate": frame_rate,
+        }
+
+    def _parse_duration(self, value: str | None) -> float | None:
+        """Parse ffprobe duration values."""
+        if not value or value == "N/A":
+            return None
+
+        try:
+            return round(float(value), 3)
+        except ValueError:
+            return None
+
+    def _parse_frame_rate(self, value: str | None) -> float | None:
+        """Parse ffprobe frame rate values such as 30000/1001."""
+        if not value or value == "0/0":
+            return None
+
+        try:
+            return round(float(Fraction(value)), 3)
+        except ValueError:
+            return None
 
     def extract_keywords(self, filename: str) -> list:
         """Extract keywords from video filename."""
@@ -98,6 +179,7 @@ def main():
                         help="Image generator to use")
 
     args = parser.parse_args()
+    metadata = None
 
     # Initialize components
     analyzer = VideoAnalyzer()
@@ -111,6 +193,9 @@ def main():
         metadata = analyzer.analyze(args.filename)
         print(f"   Name: {metadata['name_without_ext']}")
         print(f"   Size: {metadata['size_mb']} MB")
+        print(f"   Duration: {metadata['duration_seconds']} seconds")
+        print(f"   Resolution: {metadata['resolution']}")
+        print(f"   Frame rate: {metadata['frame_rate']} fps")
 
         keywords = analyzer.extract_keywords(metadata["name_without_ext"])
         print(f"   Extracted keywords: {', '.join(keywords)}")
@@ -137,13 +222,15 @@ def main():
 
     # Save results
     pairing = {
-        "video_metadata": {
-            "filename": args.filename or "custom",
+        "video_metadata": metadata or {
+            "filename": "custom",
             "keywords": keywords,
             "generated_at": datetime.now().isoformat(),
         },
         "pairings": [],
     }
+    pairing["video_metadata"]["keywords"] = keywords
+    pairing["video_metadata"]["generated_at"] = datetime.now().isoformat()
 
     for i, (img_path, quote) in enumerate(zip(image_paths, quotes), 1):
         pairing["pairings"].append({
