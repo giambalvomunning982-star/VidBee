@@ -175,7 +175,7 @@ def main():
                         choices=["emotional", "inspirational", "romantic", "philosophical"],
                         help="Quote generation style")
     parser.add_argument("--output-dir", type=str, default="output", help="Output directory")
-    parser.add_argument("--generator", type=str, default="openai", choices=["openai", "sd"],
+    parser.add_argument("--generator", type=str, default="openai", choices=["openai", "agnes", "sd"],
                         help="Image generator to use")
 
     args = parser.parse_args()

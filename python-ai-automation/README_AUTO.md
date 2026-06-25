@@ -131,3 +131,31 @@ python main.py --filename "E:\downloads\beautiful_sunset.mp4" --style anime --co
 
 # 3. 查看输出
 # 输出文件在 output/beautiful_sunset_YYYYMMDD_HHMMSS/ 目录
+
+```
+
+## Video generation API script
+
+`video_generator.py` calls a configurable video generation API, polls async tasks, and saves the generated `.mp4` file.
+
+Add these values to `.env`:
+
+```env
+VIDEO_API_URL=https://api.example.com/v1/videos/generations
+VIDEO_API_KEY=your_video_api_key_here
+VIDEO_MODEL=your_video_model_here
+VIDEO_OUTPUT_DIR=output/videos
+VIDEO_STATUS_URL_TEMPLATE=https://api.example.com/v1/videos/{task_id}
+```
+
+Run it:
+
+```bash
+python video_generator.py --prompt "A cinematic sunset over a quiet city street" --duration 5 --aspect-ratio 16:9
+```
+
+You can pass provider-specific fields with `--payload-json`:
+
+```bash
+python video_generator.py --prompt "A product shot with slow camera movement" --payload-json "{\"seed\":123,\"quality\":\"high\"}"
+```

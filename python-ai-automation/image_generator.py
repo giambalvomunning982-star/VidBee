@@ -5,10 +5,12 @@ Supports OpenAI DALL-E and Stable Diffusion WebUI.
 """
 
 import os
+import base64
 import time
 from pathlib import Path
 from typing import Optional
 
+import requests
 from dotenv import load_dotenv
 from openai import OpenAI
 
@@ -46,10 +48,22 @@ class ImageGenerator:
         self.output_path = Path(output_dir)
         self.output_path.mkdir(parents=True, exist_ok=True)
 
+        self.openai_image_model = os.getenv("OPENAI_IMAGE_MODEL", "dall-e-3")
+        self.agnes_image_model = os.getenv("AGNES_IMAGE_MODEL") or self.openai_image_model
+
         if generator_type == "openai":
             api_key = os.getenv("OPENAI_API_KEY")
             base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
             self.client = OpenAI(api_key=api_key, base_url=base_url)
+        elif generator_type == "agnes":
+            self.agnes_api_key = os.getenv("AGNES_API_KEY")
+            self.agnes_image_url = os.getenv("AGNES_IMAGE_API_URL")
+            agnes_base_url = os.getenv("AGNES_OPENAI_BASE_URL") or os.getenv("AGNES_API_BASE_URL")
+            self.client = (
+                OpenAI(api_key=self.agnes_api_key, base_url=agnes_base_url)
+                if agnes_base_url
+                else None
+            )
         elif generator_type == "sd":
             self.sd_url = os.getenv("SD_WEBUI_URL", "http://127.0.0.1:7860")
 
@@ -83,6 +97,8 @@ class ImageGenerator:
         """Generate images from prompts."""
         if self.generator_type == "openai":
             return self._generate_with_openai(prompts)
+        elif self.generator_type == "agnes":
+            return self._generate_with_agnes(prompts)
         elif self.generator_type == "sd":
             return self._generate_with_sd(prompts)
         else:
@@ -96,7 +112,7 @@ class ImageGenerator:
             try:
                 print(f"   Generating image {i + 1}/{len(prompts)}...")
                 response = self.client.images.generate(
-                    model="dall-e-3",
+                    model=self.openai_image_model,
                     prompt=prompt,
                     size=self.size,
                     n=1,
@@ -107,7 +123,6 @@ class ImageGenerator:
                 filename = f"image_{i + 1:02d}.png"
                 filepath = self.output_path / filename
 
-                import base64
                 with open(filepath, "wb") as f:
                     f.write(base64.b64decode(image_data))
 
@@ -119,10 +134,114 @@ class ImageGenerator:
 
         return image_paths
 
+    def _generate_with_agnes(self, prompts: list) -> list:
+        """Generate images using Agnes image API or an OpenAI-compatible Agnes endpoint."""
+        if self.agnes_image_url:
+            return self._generate_with_agnes_rest(prompts)
+
+        if not self.client:
+            raise ValueError("AGNES_IMAGE_API_URL or AGNES_OPENAI_BASE_URL is required for Agnes images.")
+
+        return self._generate_with_openai_compatible(
+            prompts=prompts,
+            model=self.agnes_image_model,
+        )
+
+    def _generate_with_openai_compatible(self, prompts: list, model: str) -> list:
+        """Generate images through an OpenAI-compatible images API."""
+        image_paths = []
+
+        for i, prompt in enumerate(prompts):
+            try:
+                print(f"   Generating image {i + 1}/{len(prompts)}...")
+                response = self.client.images.generate(
+                    model=model,
+                    prompt=prompt,
+                    size=self.size,
+                    n=1,
+                    response_format="b64_json",
+                )
+
+                image_data = response.data[0].b64_json
+                filename = f"image_{i + 1:02d}.png"
+                filepath = self.output_path / filename
+
+                with open(filepath, "wb") as f:
+                    f.write(base64.b64decode(image_data))
+
+                image_paths.append(filepath)
+                print(f"   Saved: {filepath.name}")
+
+            except Exception as e:
+                print(f"   Error generating image {i + 1}: {e}")
+
+        return image_paths
+
+    def _generate_with_agnes_rest(self, prompts: list) -> list:
+        """Generate images using a configured Agnes REST image endpoint."""
+        image_paths = []
+        headers = {"Content-Type": "application/json"}
+        if self.agnes_api_key:
+            headers["Authorization"] = f"Bearer {self.agnes_api_key}"
+
+        for i, prompt in enumerate(prompts):
+            try:
+                print(f"   Generating image {i + 1}/{len(prompts)}...")
+                payload = {
+                    "model": self.agnes_image_model,
+                    "prompt": prompt,
+                    "size": self.size,
+                    "n": 1,
+                    "response_format": "b64_json",
+                }
+                response = requests.post(
+                    self.agnes_image_url,
+                    headers=headers,
+                    json=payload,
+                    timeout=120,
+                )
+                response.raise_for_status()
+                image_data = self._extract_image_data(response.json())
+
+                filename = f"image_{i + 1:02d}.png"
+                filepath = self.output_path / filename
+                with open(filepath, "wb") as f:
+                    f.write(image_data)
+
+                image_paths.append(filepath)
+                print(f"   Saved: {filepath.name}")
+                time.sleep(1)
+
+            except Exception as e:
+                print(f"   Error generating image {i + 1}: {e}")
+
+        return image_paths
+
+    def _extract_image_data(self, data: dict) -> bytes:
+        """Extract image bytes from common API response shapes."""
+        candidates = []
+        if isinstance(data.get("data"), list):
+            candidates.extend(item for item in data["data"] if isinstance(item, dict))
+        if isinstance(data.get("output"), list):
+            candidates.extend(item for item in data["output"] if isinstance(item, dict))
+        candidates.append(data)
+
+        for item in candidates:
+            b64_json = item.get("b64_json") or item.get("image_base64") or item.get("image")
+            if isinstance(b64_json, str):
+                clean_value = b64_json.removeprefix("data:image/png;base64,")
+                return base64.b64decode(clean_value)
+
+            image_url = item.get("url") or item.get("image_url") or item.get("output_url")
+            if isinstance(image_url, str) and image_url.startswith(("http://", "https://")):
+                response = requests.get(image_url, timeout=120)
+                response.raise_for_status()
+                return response.content
+
+        raise ValueError("Agnes image response did not include image data.")
+
     def _generate_with_sd(self, prompts: list) -> list:
         """Generate images using Stable Diffusion WebUI API."""
-        import requests
-
         image_paths = []
         style_config = self.STYLES.get(self.style, self.STYLES["anime"])
 
