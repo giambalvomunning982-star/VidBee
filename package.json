@@ -2,7 +2,7 @@
   "name": "vidbee-workspace",
   "private": true,
   "scripts": {
-    "check": "pnpm --filter ./apps/desktop run check",
+    "check": "pnpm --filter ./apps/desktop run check 2>&1 || { echo \"ERROR: 'pnpm check' failed. See output above for details.\"; exit 1; }",
     "check:i18n": "pnpm --filter ./apps/desktop run check:i18n",
     "typecheck": "pnpm --filter ./apps/desktop run typecheck",
     "dev": "pnpm --filter ./apps/desktop run dev",

@@ -40,7 +40,16 @@
     "indentStyle": "space",
     "indentWidth": 2,
     "lineWidth": 100,
-    "lineEnding": "lf"
+    "lineEnding": "lf",
+    "attributePosition": "auto"
+  },
+  "assist": {
+    "actions": {
+      "source": {
+        "organizeImports": "on",
+        "useSortedAttributes": "off"
+      }
+    }
   },
   "javascript": {
     "globals": ["browser", "defineBackground"],

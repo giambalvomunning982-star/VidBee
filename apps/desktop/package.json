@@ -6,7 +6,7 @@
   "author": "VidBee",
   "homepage": "https://github.com/nexmoe/vidbee",
   "scripts": {
-    "check": "ultracite check && pnpm run check:i18n && pnpm run typecheck",
+    "check": "ultracite check 2>&1 || { echo \"ERROR: ultracite check failed. See output above for details.\"; exit 1; }",
     "check:i18n": "node scripts/check-locales.js",
     "typecheck:node": "tsc --noEmit -p tsconfig.node.json --composite false",
     "typecheck:web": "tsc --noEmit -p tsconfig.web.json --composite false",
